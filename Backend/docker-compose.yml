@@ -1,0 +1,15 @@
+﻿version: '3.8'
+
+services:
+  my_service:
+    image: jogging_backend
+    ports:
+      - "8080:80"
+      - "8081:443"
+    volumes:
+      - "/etc/ssl/certs:/certs"
+    environment:
+      - ASPNETCORE_URLS=https://+;http://+
+      - ASPNETCORE_HTTPS_PORT=8081
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/certs/cert.pem
+      - ASPNETCORE_Kestrel__Certificates__Default__KeyPath=/certs/key.pem

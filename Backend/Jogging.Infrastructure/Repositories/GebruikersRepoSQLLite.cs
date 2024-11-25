@@ -1,0 +1,3 @@
+﻿namespace Jogging.Infrastructure.Repositories
+{
+}
