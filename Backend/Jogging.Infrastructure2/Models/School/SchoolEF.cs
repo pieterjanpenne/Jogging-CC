@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Jogging.Infrastructure2.Models;
 
 [Table("School")]
-public partial class School
+public partial class SchoolEF
 {
     [Key]
     public int Id { get; set; }

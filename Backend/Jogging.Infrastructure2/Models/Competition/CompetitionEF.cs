@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Jogging.Infrastructure2.Models;
 
 [Table("Competition")]
-public partial class Competition
+public partial class CompetitionEF
 {
     [Key]
     public int Id { get; set; }
@@ -32,4 +32,5 @@ public partial class Competition
     public string? Url { get; set; }
 
     public bool? RankingActive { get; set; }
+
 }

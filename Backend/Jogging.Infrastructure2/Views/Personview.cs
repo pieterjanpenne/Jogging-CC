@@ -4,12 +4,11 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace Jogging.Infrastructure2.Models;
+namespace Jogging.Infrastructure2.Views;
 
-[Table("Person")]
-public partial class Person
+[Keyless]
+public partial class Personview
 {
-    [Key]
     public int Id { get; set; }
 
     [StringLength(50)]

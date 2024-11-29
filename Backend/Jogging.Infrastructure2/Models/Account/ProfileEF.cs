@@ -4,10 +4,10 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace Jogging.Infrastructure2.Models;
+namespace Jogging.Infrastructure2.Models.Account;
 
 [Table("Profile")]
-public partial class Profile
+public partial class ProfileEF
 {
     [Key]
     [Column("id")]

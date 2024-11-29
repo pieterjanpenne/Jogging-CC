@@ -6,9 +6,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Jogging.Infrastructure2.Models;
 
-[Keyless]
-public partial class Personview
+[Table("Person")]
+public partial class PersonEF
 {
+    [Key]
     public int Id { get; set; }
 
     [StringLength(50)]

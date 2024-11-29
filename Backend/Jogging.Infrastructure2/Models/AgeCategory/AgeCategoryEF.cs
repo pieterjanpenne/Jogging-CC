@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Jogging.Infrastructure2.Models;
 
 [Table("AgeCategory")]
-public partial class AgeCategory
+public partial class AgeCategoryEF
 {
     [Key]
     public int Id { get; set; }
