@@ -37,6 +37,8 @@ public partial class JoggingCcContext : DbContext
 
     public virtual DbSet<SchoolEF> Schools { get; set; }
 
+    public virtual DbSet<Club> Clubs { get; set; }
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         => optionsBuilder.UseMySql("server=mysql-28d63a87-linabencheikh-nt.f.aivencloud.com;port=21290;database=Jogging_CC;uid=avnadmin;pwd=AVNS_vEpmT_7ygfJjKSPWezk", Microsoft.EntityFrameworkCore.ServerVersion.Parse("8.0.30-mysql"));
 
@@ -76,6 +78,11 @@ public partial class JoggingCcContext : DbContext
             entity.HasKey(e => e.Id).HasName("PRIMARY");
 
             entity.Property(e => e.Gender).HasDefaultValueSql("''");
+
+                entity.HasOne(p => p.Club)
+                      .WithMany(c => c.Members)
+                      .HasForeignKey(p => p.ClubId)
+                      .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Personview>(entity =>
@@ -98,6 +105,15 @@ public partial class JoggingCcContext : DbContext
         modelBuilder.Entity<SchoolEF>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("PRIMARY");
+        });
+
+        modelBuilder.Entity<Club>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PRIMARY");
+
+            entity.HasMany(e => e.Members)
+                .WithOne(e => e.Club)
+                .HasForeignKey(e => e.ClubId);
         });
 
         OnModelCreatingPartial(modelBuilder);
