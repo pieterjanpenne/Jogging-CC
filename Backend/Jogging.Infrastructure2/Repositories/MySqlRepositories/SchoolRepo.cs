@@ -2,72 +2,66 @@
 using Jogging.Domain.Exceptions;
 using Jogging.Domain.Interfaces.RepositoryInterfaces;
 using Jogging.Domain.Models;
-using Jogging.Infrastructure.Models;
-using Jogging.Infrastructure.Models.DatabaseModels.School;
+using Jogging.Infrastructure2.Data;
+using Jogging.Infrastructure2.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace Jogging.Infrastructure.Repositories.SupabaseRepos;
 
 public class SchoolRepo : IGenericRepo<SchoolDom>
 {
-    private readonly Supabase.Client _client;
+    private readonly JoggingCcContext _context;
     private readonly IMapper _mapper;
 
-    public SchoolRepo(Supabase.Client client, IMapper mapper)
+    public SchoolRepo(JoggingCcContext context, IMapper mapper)
     {
-        _client = client;
+        _context = context;
         _mapper = mapper;
     }
 
     public async Task<List<SchoolDom>> GetAllAsync()
     {
-        var schools = await _client
-            .From<ExtendedSchool>()
-            .Get();
-
-        if (schools?.Models?.Count == null)
+        try
         {
-            throw new SchoolNotFoundException("No schools found");
+            return _mapper.Map<List<SchoolDom>>(await _context.Schools.ToListAsync());
         }
-
-        return _mapper.Map<List<SchoolDom>>(schools.Models);
+        catch (Exception ex)
+        {
+            throw new Exception($"GetAllAsync: {ex.Message}");
+        }
     }
 
     public async Task<SchoolDom> GetByIdAsync(int schoolId)
     {
-        var school = await GetSchoolById(schoolId);
-
-        if (school == null)
+        try
         {
-            throw new SchoolNotFoundException("No school found");
+            return _mapper.Map<SchoolDom>(await _context.Schools.Where(s => s.Id == schoolId));
         }
-
-        return _mapper.Map<SchoolDom>(school);
+        catch (Exception ex)
+        {
+            throw new Exception($"GetByIdAsync: {ex.Message}");
+        }
     }
 
     public async Task<SchoolDom> AddAsync(SchoolDom schoolDom)
     {
-        var existingSchool = await GetSchoolByName(schoolDom.Name);
-
-        if (existingSchool != null)
+        try
         {
-            return _mapper.Map<SchoolDom>(existingSchool);
+            await _context.Schools.AddAsync(_mapper.Map<SchoolEF>(schoolDom));
+            await _context.SaveChangesAsync();
+
+            return schoolDom;
         }
-
-        var response = await _client
-            .From<SimpleSchool>()
-            .Insert(_mapper.Map<SimpleSchool>(schoolDom));
-
-        if (response.Model == null)
+        catch (Exception ex)
         {
-            throw new SchoolNotFoundException("Something went wrong while adding your school");
+            throw new Exception($"AddAsync: {ex.Message}");
         }
-
-        return _mapper.Map<SchoolDom>(response.Model);
     }
 
     public async Task<SchoolDom> UpdateAsync(int schoolId, SchoolDom updatedSchool)
     {
-        var existingSchool = await GetSchoolById(schoolId);
+        var existingSchool = await _context.Schools
+        .FirstOrDefaultAsync(s => s.Id == schoolId);
 
         if (existingSchool == null)
         {
@@ -81,12 +75,13 @@ public class SchoolRepo : IGenericRepo<SchoolDom>
 
         existingSchool.Name = updatedSchool.Name;
 
-        var update = await existingSchool
-            .Update<SimpleSchool>();
-
-        if (update.Model == null)
+        try
         {
-            throw new SchoolException("Something went wrong while updating your school");
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            throw new SchoolException($"Something went wrong while updating your school: {ex.Message}");
         }
 
         return _mapper.Map<SchoolDom>(existingSchool);
@@ -94,7 +89,7 @@ public class SchoolRepo : IGenericRepo<SchoolDom>
 
     public async Task<SchoolDom> UpsertAsync(int? schoolId, SchoolDom updatedSchool)
     {
-        SimpleSchool? currentSchool;
+        SchoolEF? currentSchool;
         if (schoolId.HasValue)
         {
             currentSchool = await GetSchoolById(schoolId.Value);
@@ -114,12 +109,13 @@ public class SchoolRepo : IGenericRepo<SchoolDom>
 
             currentSchool.Name = updatedSchool.Name;
 
-            var update = await currentSchool
-                .Update<SimpleSchool>();
-
-            if (update.Model == null)
+            try
             {
-                throw new SchoolException("Something went wrong while updating your school");
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new SchoolException($"UpsertAsync: {ex.Message}");
             }
 
             return _mapper.Map<SchoolDom>(currentSchool);
@@ -130,26 +126,27 @@ public class SchoolRepo : IGenericRepo<SchoolDom>
 
     public async Task DeleteAsync(int id)
     {
-        await _client
-            .From<SimpleSchool>()
-            .Where(s => s.Id == id)
-            .Delete();
+        var school = await _context.Schools
+                .FirstOrDefaultAsync(s => s.Id == id);
+
+        if (school == null)
+        {
+            throw new SchoolNotFoundException("School not found");
+        }
+
+        _context.Schools.Remove(school);
+        await _context.SaveChangesAsync();
     }
 
-    private async Task<SimpleSchool?> GetSchoolById(int schoolId)
+    private async Task<SchoolEF?> GetSchoolById(int schoolId)
     {
-        return await _client
-            .From<SimpleSchool>()
-            .Where(c => c.Id == schoolId)
-            .Limit(1)
-            .Single();
+        return await _context.Schools
+        .FirstOrDefaultAsync(s => s.Id == schoolId);
     }
 
-    private async Task<SimpleSchool?> GetSchoolByName(string schoolName)
+    private async Task<SchoolEF?> GetSchoolByName(string schoolName)
     {
-        return await _client.From<SimpleSchool>()
-            .Where(a => a.Name == schoolName)
-            .Limit(1)
-            .Single();
+        return await _context.Schools
+       .FirstOrDefaultAsync(s => s.Name == schoolName);
     }
 }

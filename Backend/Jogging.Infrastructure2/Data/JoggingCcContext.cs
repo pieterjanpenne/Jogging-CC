@@ -48,7 +48,7 @@ public partial class JoggingCcContext : DbContext
             .UseCollation("utf8mb4_0900_ai_ci")
             .HasCharSet("utf8mb4");
 
-        modelBuilder.Entity<AddressEf>(entity =>
+        modelBuilder.Entity<AddressEF>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("PRIMARY");
         });
