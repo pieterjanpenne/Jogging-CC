@@ -5,10 +5,12 @@ using Jogging.Domain.Helpers;
 using Jogging.Domain.Interfaces.RepositoryInterfaces;
 using Jogging.Domain.Models;
 using Jogging.Infrastructure2.Data;
+using Jogging.Infrastructure2.Models;
+using Jogging.Infrastructure2.Models.CompetitionPerCategory;
+using Jogging.Infrastructure2.Models.DatabaseModels.Competition;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Postgrest;
-using Postgrest.Interfaces;
+using System.Net;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace Jogging.Infrastructure.Repositories.SupabaseRepos
@@ -33,97 +35,172 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<List<CompetitionDom>> GetAllAsync()
         {
-            return _mapper.Map<List<CompetitionDom>>(await _context.Competitions.ToListAsync());
+            try
+            {
+                return _mapper.Map<List<CompetitionDom>>(await _context.Competitions.ToListAsync());
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetAllAsync: {ex.Message}");
+            }
         }
 
         public async Task<List<CompetitionDom>> GetAllWithSearchValuesAsync(string? competitionName, DateOnly? startDate, DateOnly? endDate)
         {
-            var query = _context.Competitions.AsQueryable();
-            if (!string.IsNullOrEmpty(competitionName))
+            try
             {
-                query.Where(c => EF.Functions.Like(c.Name, $"{competitionName}"));
-            }
+                var query = _context.Competitions.AsQueryable();
+                if (!string.IsNullOrEmpty(competitionName))
+                {
+                    query.Where(c => EF.Functions.Like(c.Name, $"{competitionName}"));
+                }
 
-            if (startDate.HasValue)
+                if (startDate.HasValue)
+                {
+                    var startDateTime = startDate.Value.ToDateTime(TimeOnly.MinValue);
+                    query = query.Where(c => c.Date >= startDateTime);
+                }
+
+                if (endDate.HasValue)
+                {
+                    var endDateTime = endDate.Value.ToDateTime(TimeOnly.MinValue);
+                    query = query.Where(c => c.Date <= endDateTime);
+                }
+
+                return _mapper.Map<List<CompetitionDom>>(await query.ToListAsync());
+            }
+            catch (Exception ex)
             {
-                var startDateTime = startDate.Value.ToDateTime(TimeOnly.MinValue);
-                query = query.Where(c => c.Date >= startDateTime);
+                throw new Exception($"GetAllWithSearchValuesAsync: {ex.Message}");
             }
-
-            if (endDate.HasValue)
-            {
-                var endDateTime = endDate.Value.ToDateTime(TimeOnly.MinValue);
-                query = query.Where(c => c.Date <= endDateTime);
-            }
-
-            return _mapper.Map<List<CompetitionDom>>(await query.ToListAsync());
         }
+
         public async Task<List<CompetitionDom>> GetAllActiveAsync()
         {
-            return _mapper.Map<List<CompetitionDom>>(
-                await _context.Competitions.Where(c => c.Active == true).ToListAsync()
-            );
+            try
+            {
+
+                return _mapper.Map<List<CompetitionDom>>(
+                    await _context.Competitions.Where(c => c.Active == true).ToListAsync()
+                );
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetAllActiveAsync: {ex.Message}");
+            }
         }
 
         public async Task<List<CompetitionDom>> GetAllActiveWithSearchValuesAsync(string? competitionName, DateOnly? startDate, DateOnly? endDate)
         {
-            throw new NotImplementedException();
+            try
+            {
+                var query = _context.Competitions.AsQueryable();
 
+                if (!string.IsNullOrEmpty(competitionName))
+                    query = query.Where(c => EF.Functions.Like(c.Name, $"%{competitionName}%"));
+
+                if (startDate.HasValue)
+                    query = query.Where(c => c.Date >= startDate.Value.ToDateTime(TimeOnly.MinValue));
+
+                if (endDate.HasValue)
+                    query = query.Where(c => c.Date <= endDate.Value.ToDateTime(TimeOnly.MinValue));
+
+                var competitions = await query
+                    .OrderBy(c => c.Date)
+                    .ToListAsync();
+
+                if (competitions.Count == 0)
+                    throw new Exception("No competitions found");
+
+                return _mapper.Map<List<CompetitionDom>>(competitions);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetAllActiveWithSearchValuesAsync: {ex.Message}");
+            }
         }
 
         public async Task<List<CompetitionDom>> GetAllActiveRankingAsync()
         {
-            throw new NotImplementedException();
-
+            try
+            {
+                return _mapper.Map<List<CompetitionDom>>(await _context.Competitions.Where(c => c.RankingActive == true).ToListAsync());
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetAllActiveRankingAsync: {ex.Message}");
+            }
         }
 
         public async Task<CompetitionDom> GetSimpleCompetitionByIdAsync(int competitionId)
         {
-            throw new NotImplementedException();
-
+            try
+            {
+                return _mapper.Map<CompetitionDom>(await _context.Competitions.FindAsync(competitionId));
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetSimpleCompetitionByIdAsync: {ex.Message}");
+            }
         }
 
         public async Task<CompetitionDom> GetByIdAsync(int competitionId)
         {
-            var competition = await GetExtendedCompetitionById(competitionId);
+            try
+            {
+                var competition = await GetExtendedCompetitionById(competitionId);
 
-            return _mapper.Map<CompetitionDom>(competition);
+                return _mapper.Map<CompetitionDom>(competition);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetByIdAsync: {ex.Message}");
+            }
         }
 
         public async Task<CompetitionDom> AddAsync(CompetitionDom competitionDom)
         {
-            throw new NotImplementedException();
+            try
+            {
+                await _context.Competitions.AddAsync(_mapper.Map<CompetitionEF>(competitionDom));
+                await _context.SaveChangesAsync();
 
+                return competitionDom;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"AddAsync: {ex.Message}");
+            }
         }
 
         public async Task<CompetitionDom> UpdateAsync(int competitionId, CompetitionDom updatedCompetition)
         {
-            var currentCompetition = await GetExtendedCompetitionById(competitionId);
+            var currentCompetition = await _context.Competitions.FindAsync(competitionId);
 
-            var isAddressUpdated = await UpdateAddressIfNeeded(currentCompetition, updatedCompetition.Address);
-            var isDistancesUpdated = await UpdateDistancesIfNeeded(currentCompetition, updatedCompetition);
+            if (currentCompetition == null) throw new CompetitionException("Competition not found");
 
-            if (isAddressUpdated || isDistancesUpdated || !_mapper.Map<CompetitionDom>(currentCompetition).Equals(updatedCompetition))
+            bool hasChanges =
+                 currentCompetition.Name != updatedCompetition.Name ||
+                 currentCompetition.Information != updatedCompetition.Information ||
+                 currentCompetition.Date != updatedCompetition.Date ||
+                 currentCompetition.Active != updatedCompetition.Active ||
+                 currentCompetition.RankingActive != updatedCompetition.RankingActive;
+
+            if (hasChanges)
             {
-                currentCompetition.Name = updatedCompetition.Name;
-                currentCompetition.Information = updatedCompetition.Information;
-                currentCompetition.Date = updatedCompetition.Date;
-                currentCompetition.Active = updatedCompetition.Active;
                 if (currentCompetition.RankingActive != updatedCompetition.RankingActive)
-                {
                     _memoryCache.Remove(CacheKeyGenerator.GetAllResultsKey());
-                }
 
-                currentCompetition.RankingActive = updatedCompetition.RankingActive;
+                _mapper.Map(updatedCompetition, currentCompetition);
 
-                var competition = await currentCompetition.Update<ExtendedCompetition>();
-
-                if (competition.Model == null)
+                try
                 {
-                    throw new CompetitionException("Something went wrong while updating your competition");
+                    await _context.SaveChangesAsync();
                 }
-
-                return _mapper.Map<CompetitionDom>(competition.Model);
+                catch (Exception ex)
+                {
+                    throw new Exception("Failed to update competition", ex);
+                }
             }
 
             return _mapper.Map<CompetitionDom>(currentCompetition);
@@ -131,22 +208,68 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task DeleteAsync(int competitionId)
         {
-            throw new NotImplementedException();
+            try
+            {
+                _context.Competitions.Remove(_mapper.Map<CompetitionEF>(_context.Competitions.Find(competitionId)));
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"DeleteAsync: {ex.Message}");
+            }
         }
 
         private async Task<ExtendedCompetition> GetExtendedCompetitionById(int competitionId)
         {
-            throw new NotImplementedException();
+            try
+            {
+                return _mapper.Map<ExtendedCompetition>(await _context.Competitions.FindAsync(competitionId));
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetExtendedCompetitionById: {ex.Message}");
+            }
         }
 
         private async Task<bool> UpdateAddressIfNeeded(ExtendedCompetition competition, AddressDom updatedAddress)
         {
-            throw new NotImplementedException();
+            if (updatedAddress == null) return false;
+
+            bool addressChanged = competition.Address == null || !_mapper.Map<AddressDom>(competition.Address).Equals(updatedAddress);
+
+            if (addressChanged)
+            {
+                var address = await _context.Addresses
+                    .FirstOrDefaultAsync(a =>
+                        a.Street == updatedAddress.Street &&
+                        a.City == updatedAddress.City);
+
+                if (address == null)
+                {
+                    address = _mapper.Map<AddressEF>(updatedAddress);
+                    _context.Addresses.Add(address);
+                }
+                else
+                {
+                    _mapper.Map(updatedAddress, address);
+                }
+
+                await _context.SaveChangesAsync();
+
+                competition.AddressId = address.Id;
+                competition.Address = address;
+
+                return true;
+            }
+
+            return false;
         }
 
         private async Task<bool> UpdateDistancesIfNeeded(ExtendedCompetition competition, CompetitionDom updatedCompetitionDom)
         {
-            throw new NotImplementedException();
+            var competitionPerCategories = await _competitionPerCategoryRepo.UpdateAsync(updatedCompetitionDom.Distances, competition.Id);
+            competition.CompetitionPerCategories = _mapper.Map<List<ExtendedCompetitionPerCategory>>(competitionPerCategories);
+            return true;
         }
 
         public Task<CompetitionDom> UpsertAsync(int? addressId, CompetitionDom updatedItem)
