@@ -3,18 +3,14 @@ using Jogging.Domain.Exceptions;
 using Jogging.Domain.Helpers;
 using Jogging.Domain.Interfaces.RepositoryInterfaces;
 using Jogging.Domain.Models;
-using Jogging.Infrastructure.Models.DatabaseModels.Competition;
-using Jogging.Infrastructure.Models.DatabaseModels.Registration;
-using Jogging.Infrastructure.Models.SearchModels.Registration;
-using Microsoft.Extensions.Caching.Memory;
-using Postgrest;
-using Client = Supabase.Client;
-
+using Jogging.Infrastructure2.Data;
+using Jogging.Infrastructure2.Models;
+using Microsoft.EntityFrameworkCore;
 namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 {
     public class RegistrationRepo : IRegistrationRepo
     {
-        private readonly Client _client;
+        private readonly JoggingCcContext _context;
         private readonly IAgeCategoryRepo _ageCategoryRepo;
         private readonly IPersonRepo _personRepo;
         private readonly ICompetitionPerCategoryRepo _competitionPerCategoryRepo;
@@ -22,11 +18,11 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
         private readonly IMapper _mapper;
         private readonly CustomMemoryCache _memoryCache;
 
-        public RegistrationRepo(Client client, IAgeCategoryRepo ageCategoryRepo,
+        public RegistrationRepo(JoggingCcContext context, IAgeCategoryRepo ageCategoryRepo,
             ICompetitionPerCategoryRepo competitionPerCategoryRepo, IMapper mapper, CustomMemoryCache memoryCache, ICompetitionRepo competitionRepo,
             IPersonRepo personRepo)
         {
-            _client = client;
+            _context = context;
             _ageCategoryRepo = ageCategoryRepo;
             _competitionPerCategoryRepo = competitionPerCategoryRepo;
             _mapper = mapper;
@@ -39,18 +35,21 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<RegistrationDom> GetRegistrationByPersonIdAndCompetitionIdAsync(int personId, int competitionId, bool throwError = true)
         {
-            var personRegistration = await _client.From<PersonRegistration>()
-                .Where(pr => pr.PersonId == personId)
-                .Where(pr => pr.CompetitionId == competitionId)
-                .Limit(1)
-                .Single();
+            var personRegistration = await _context.Registrations.FirstOrDefaultAsync(r => r.PersonId == personId && r.CompetitionId == competitionId);
 
             if (throwError && personRegistration == null)
             {
                 throw new RegistrationNotFoundException("Registration not found");
             }
 
-            return _mapper.Map<RegistrationDom>(personRegistration);
+            try
+            {
+                return _mapper.Map<RegistrationDom>(personRegistration);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetRegistrationByPersonIdAndCompetitionIdAsync: {ex.Message}");
+            }
         }
 
         #endregion
@@ -59,15 +58,14 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<List<RegistrationDom>> GetAllAsync()
         {
-            var result = await _client.From<ExtendedRegistration>()
-                .Get();
-
-            if (result.Models.Count <= 0)
+            try
             {
-                throw new RegistrationNotFoundException("No registrations found");
+                return _mapper.Map<List<RegistrationDom>>(await _context.Registrations.ToListAsync());
             }
-
-            return _mapper.Map<List<RegistrationDom>>(result.Models);
+            catch (Exception ex)
+            {
+                throw new Exception($"GetAllAsync: {ex.Message}");
+            }
         }
 
         #endregion
@@ -76,16 +74,17 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<List<RegistrationDom>> GetAllAsync(bool withRunNumber)
         {
-            var registrations = await _client.From<ExtendedRegistration>()
-                .Where(p => p.RunNumber != null)
-                .Get();
-
-            if (registrations.Models.Count <= 0)
+            try
             {
-                throw new RegistrationNotFoundException("No registrations found");
-            }
+                var registrations = await _context.Registrations
+                .Where(p => p.RunNumber != null).ToListAsync();
 
-            return _mapper.Map<List<RegistrationDom>>(registrations.Models);
+                return _mapper.Map<List<RegistrationDom>>(registrations);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetAllAsync: {ex.Message}");
+            }
         }
 
         #endregion
@@ -95,25 +94,24 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
         public async Task<List<RegistrationDom>> GetByCompetitionIdAndSearchValueAsync(int competitionId, string searchValue,
             bool withRunNumber)
         {
-            var parameters = new Dictionary<string, object>
-            {
-                { "competitionid", competitionId },
-                { "searchvalue", searchValue }
-            };
+            // Onzeker over searchValues
+            var registrationsQuery = _context.Registrations
+            .Where(r => r.CompetitionId == competitionId && r.RunNumber != null)
+            .AsQueryable();
 
-            var storedProcedure = await _client.Rpc<List<ExtendedRegistrationSearchByPerson>>("get_competition_registrations", parameters);
-
-            if (withRunNumber && storedProcedure != null)
+            if (withRunNumber)
             {
-                storedProcedure = storedProcedure.Where(p => p.RunNumber != null).ToList();
+                registrationsQuery = registrationsQuery.Where(r => r.RunNumber != null);
             }
 
-            if (storedProcedure == null || storedProcedure.Count == 0)
+            var registrations = await registrationsQuery.ToListAsync();
+
+            if (registrations == null || !registrations.Any())
             {
                 throw new RegistrationNotFoundException("No registrations found");
             }
 
-            return _mapper.Map<List<RegistrationDom>>(storedProcedure);
+            return _mapper.Map<List<RegistrationDom>>(registrations);
         }
 
         #endregion
@@ -199,10 +197,15 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task DeleteByPersonIdAndCompetitionIdAsync(int personId, int competitionId)
         {
-            await _client.From<SimpleRegistration>()
-                .Where(registration => registration.PersonId == personId)
-                .Where(registration => registration.CompetitionId == competitionId)
-                .Delete();
+            try
+            {
+                _context.Remove(GetRegistrationByPersonIdAndCompetitionIdAsync(personId, competitionId));
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"DeleteByPersonIdAndCompetitionIdAsync: {ex.Message}");
+            }
         }
 
         #endregion
@@ -211,9 +214,14 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task DeleteAsync(int registrationId)
         {
-            await _client.From<SimpleRegistration>()
-                .Where(c => c.Id == registrationId)
-                .Delete();
+            try
+            {
+                _context.Remove(GetByIdAsync(registrationId));
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"DeleteAsync: {ex.Message}");
+            }
         }
 
         #endregion
@@ -222,14 +230,14 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<RegistrationDom> GetByIdAsync(int registrationId)
         {
-            var registration = await GetSimpleRegistrationByIdAsync(registrationId);
-
-            if (registration == null)
+            try
             {
-                throw new RegistrationNotFoundException("Registration not found");
+                return _mapper.Map<RegistrationDom>(_context.Registrations.FindAsync(registrationId));
             }
-
-            return _mapper.Map<RegistrationDom>(registration);
+            catch (Exception ex)
+            {
+                throw new Exception($"GetByIdAsync: {ex.Message}");
+            }
         }
 
         #endregion
@@ -239,33 +247,29 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
         public async Task<RegistrationDom> SignInToContestAsync(int competitionId, PersonDom person, string distanceName)
         {
             await CheckDuplicateRegistration(person.Id, competitionId);
-            CompetitionDom competition = await _competitionRepo.GetSimpleCompetitionByIdAsync(competitionId);
-            AgeCategoryDom ageCategory = await _ageCategoryRepo.GetAgeCategoryByAge(person);
-            CompetitionPerCategoryDom competitionPerCategory =
-                await _competitionPerCategoryRepo.GetCompetitionPerCategoryByParameters(ageCategory.Id, distanceName, person.Gender, competitionId);
 
-            SimpleRegistration registration = new SimpleRegistration
-                { CompetitionPerCategoryId = competitionPerCategory.Id, Paid = false, PersonId = person.Id, CompetitionId = competitionId };
+            var competition = await _competitionRepo.GetSimpleCompetitionByIdAsync(competitionId);
+            var ageCategory = await _ageCategoryRepo.GetAgeCategoryByAge(person);
+            var competitionPerCategory = await _competitionPerCategoryRepo
+                .GetCompetitionPerCategoryByParameters(ageCategory.Id, distanceName, person.Gender, competitionId);
 
-            var performedRegistration = await _client.From<SimpleRegistration>()
-                .Insert(registration);
+            var registration = new RegistrationEF
+            {
+                CompetitionPerCategoryId = competitionPerCategory.Id,
+                Paid = false,
+                PersonId = person.Id,
+                CompetitionId = competitionId
+            };
 
-            if (performedRegistration.Model == null)
+            _context.Registrations.Add(registration);
+            await _context.SaveChangesAsync();
+
+            if (registration.Id == 0)
             {
                 throw new PersonRegistrationException("Something went wrong doing your registration");
             }
-            
-            return new RegistrationDom()
-            {
-                Id = performedRegistration.Model.Id,
-                PersonId = person.Id,
-                Person =person,
-                CompetitionId = competitionId,
-                Competition = competition,
-                CompetitionPerCategoryId = competitionPerCategory.Id,
-                CompetitionPerCategory = competitionPerCategory,
-                Paid = false,
-            };
+
+            return _mapper.Map<RegistrationDom>(registration);
         }
 
         #endregion
@@ -289,11 +293,11 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
             if (updatedItem.Paid != null)
             {
-                oldRegistration.Paid = updatedItem.Paid;
+                oldRegistration.Paid = (bool)updatedItem.Paid;
             }
 
-            await oldRegistration
-                .Update<SimpleRegistration>();
+            _context.Registrations.Update(oldRegistration);
+            await _context.SaveChangesAsync();
 
             return _mapper.Map<RegistrationDom>(oldRegistration);
         }
@@ -314,8 +318,8 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
             var runNumber = updatedItem.RunNumber == -1 ? null : updatedItem.RunNumber;
             oldRegistration.RunNumber = runNumber;
 
-            await oldRegistration
-                .Update<SimpleRegistration>();
+            _context.Registrations.Update(oldRegistration);
+            await _context.SaveChangesAsync();
 
             return _mapper.Map<RegistrationDom>(oldRegistration);
         }
@@ -326,7 +330,9 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<RegistrationDom> UpdatePaidAsync(int registrationId, RegistrationDom updatedItem)
         {
-            var oldRegistration = await GetSimpleRegistrationByIdAsync(registrationId);
+            var oldRegistration = await _context.Registrations
+               .Where(r => r.Id == registrationId)
+               .FirstOrDefaultAsync();
 
             if (oldRegistration == null)
             {
@@ -335,9 +341,10 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
             if (oldRegistration.Paid != updatedItem.Paid)
             {
-                oldRegistration.Paid = updatedItem.Paid;
+                oldRegistration.Paid = (bool)updatedItem.Paid;
 
-                await oldRegistration.Update<SimpleRegistration>();
+                _context.Registrations.Update(oldRegistration);
+                await _context.SaveChangesAsync();
             }
 
             return _mapper.Map<RegistrationDom>(oldRegistration);
@@ -350,7 +357,14 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
         public async Task<RegistrationDom> UpdateCompetitionPerCategoryAsync(int registrationId, int personId,
             CompetitionPerCategoryDom competitionPerCategory)
         {
-            var oldRegistration = await GetSimpleRegistrationByIdAsync(registrationId);
+            var oldRegistration = await _context.Registrations
+               .Where(r => r.Id == registrationId)
+               .FirstOrDefaultAsync();
+
+            var person = await _context.People
+                .Where(p => p.Id == personId)
+                .FirstOrDefaultAsync();
+
             if (oldRegistration == null)
             {
                 throw new RegistrationNotFoundException("Registration not found");
@@ -361,37 +375,37 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
                 throw new PersonRegistrationException("You can't change this registration");
             }
 
-            var person = await _personRepo.GetByIdAsync(personId);
-            var ageCategory = await _ageCategoryRepo.GetAgeCategoryByAge(person);
+            if (oldRegistration.PersonId != personId)
+            {
+                throw new PersonRegistrationException("You can't change this registration");
+            }
+
+            var ageCategory = await _ageCategoryRepo.GetAgeCategoryByAge(_mapper.Map<PersonDom>(person));
 
             var newCompetitionPerCategory = await _competitionPerCategoryRepo
                 .GetCompetitionPerCategoryByParameters(
                     ageCategory.Id,
                     competitionPerCategory.DistanceName,
-                    person.Gender,
-                    oldRegistration.CompetitionId
-                );
-            
+                    person.Gender.ToCharArray()[0],
+                    (int)oldRegistration.CompetitionId);
+
             oldRegistration.CompetitionPerCategoryId = newCompetitionPerCategory.Id;
 
-            await oldRegistration.Update<SimpleRegistration>();
-            
-            _memoryCache.Remove(CacheKeyGenerator.GetCompetitionResultsKey(oldRegistration.CompetitionId));
-            _memoryCache.Remove(CacheKeyGenerator.GetAllResultsKey());
+            _context.Registrations.Update(oldRegistration);
+            await _context.SaveChangesAsync();
 
             return _mapper.Map<RegistrationDom>(oldRegistration);
+
         }
 
         #endregion
 
         #region GetSimpleRegistrationByIdAsync
 
-        private async Task<SimpleRegistration?> GetSimpleRegistrationByIdAsync(int registrationId)
+        private async Task<RegistrationEF?> GetSimpleRegistrationByIdAsync(int registrationId)
         {
-            return await _client.From<SimpleRegistration>()
-                .Where(c => c.Id == registrationId)
-                .Limit(1)
-                .Single();
+            return await _context.Registrations
+                .Where(c => c.Id == registrationId).FirstOrDefaultAsync();
         }
 
         #endregion
@@ -400,11 +414,9 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         private async Task CheckDuplicateRegistration(int personId, int competitionId)
         {
-            var existingRegistrations = await _client.From<SimpleRegistration>()
+            var existingRegistrations = await _context.Registrations
                 .Where(pr => pr.PersonId == personId)
-                .Where(pr => pr.CompetitionId == competitionId)
-                .Limit(1)
-                .Single();
+                .Where(pr => pr.CompetitionId == competitionId).ToListAsync();
 
             if (existingRegistrations != null)
             {
