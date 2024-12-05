@@ -3,26 +3,25 @@ using Jogging.Domain.Exceptions;
 using Jogging.Domain.Helpers;
 using Jogging.Domain.Interfaces.RepositoryInterfaces;
 using Jogging.Domain.Models;
-using Jogging.Infrastructure.Models;
-using Jogging.Infrastructure.Models.DatabaseModels.Address;
-using Jogging.Infrastructure.Models.DatabaseModels.Person;
-using Jogging.Infrastructure.Models.DatabaseModels.School;
-using Jogging.Infrastructure.Models.SearchModels.Person;
-using Postgrest;
-using Client = Supabase.Client;
+using Jogging.Infrastructure2.Data;
+using Jogging.Infrastructure2.Models;
+using Jogging.Infrastructure2.Models.DatabaseModels.Address;
+using Jogging.Infrastructure2.Models.DatabaseModels.Person;
+using Microsoft.EntityFrameworkCore;
+using System.Net;
 
 namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 {
     public class PersonRepo : IPersonRepo
     {
-        private readonly Client _client;
+        private readonly JoggingCcContext _context;
         private readonly IGenericRepo<AddressDom> _addressRepo;
         private readonly IGenericRepo<SchoolDom> _schoolRepo;
         private readonly IMapper _mapper;
 
-        public PersonRepo(Client client, IGenericRepo<AddressDom> addressRepo, IGenericRepo<SchoolDom> schoolRepo, IMapper mapper)
+        public PersonRepo(JoggingCcContext context, IGenericRepo<AddressDom> addressRepo, IGenericRepo<SchoolDom> schoolRepo, IMapper mapper)
         {
-            _client = client;
+            _context = context;
             _addressRepo = addressRepo;
             _schoolRepo = schoolRepo;
             _mapper = mapper;
@@ -30,60 +29,57 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<List<PersonDom>> GetAllAsync()
         {
-            var persons = await _client
-                .From<ExtendedPerson>()
-                .Get();
-
-            if (persons.Models.Count <= 0)
+            try
             {
-                throw new PersonException("No persons found");
+                return _mapper.Map<List<PersonDom>>(await _context.People.ToListAsync());
             }
-
-            return _mapper.Map<List<PersonDom>>(persons.Models);
+            catch (Exception ex)
+            {
+                throw new Exception($"GetAllAsync: {ex.Message}");
+            }
         }
 
         public async Task<List<PersonDom>> GetBySearchValueAsync(string searchValue)
         {
-            var parameters = new Dictionary<string, object>
+            try
             {
-                { "search_value", searchValue }
-            };
+                var people = await _context.People
+                    .Where(p =>
+                            p.FirstName.Contains(searchValue) ||
+                            p.LastName.Contains(searchValue) ||
+                            p.Email.Contains(searchValue))
+                .ToListAsync();
 
-            var storedProcedure = await _client.Rpc<List<ExtendedPersonSearch>>("get_persons_by_search_value", parameters);
-
-            if (storedProcedure == null || storedProcedure.Count == 0)
-            {
-                throw new PersonNotFoundException("Person not found");
+                return _mapper.Map<List<PersonDom>>(people);
             }
-
-            return _mapper.Map<List<PersonDom>>(storedProcedure);
+            catch (Exception ex)
+            {
+                throw new Exception($"GetBySearchValueAsync: {ex.Message}");
+            }
         }
 
         public async Task<PersonDom> GetByIdAsync(int personId)
         {
-            var person = await GetPersonById(personId);
-
-            if (person == null)
+            try
             {
-                throw new PersonException("No person found");
+                return _mapper.Map<PersonDom>(await _context.People.FindAsync(personId));
             }
-
-            return _mapper.Map<PersonDom>(person);
+            catch (Exception ex)
+            {
+                throw new Exception($"GetByIdAsync: {ex.Message}");
+            }
         }
 
         public async Task<PersonDom> GetByEmailAsync(string email)
         {
-            var person = await _client.From<ExtendedPerson>()
-                .Where(p => p.Email == email)
-                .Limit(1)
-                .Single();
-
-            if (person == null)
+            try
             {
-                throw new PersonException("No person found");
+                return _mapper.Map<PersonDom>(await _context.People.FirstOrDefaultAsync(p => p.Email == email));
             }
-
-            return _mapper.Map<PersonDom>(person);
+            catch (Exception ex)
+            {
+                throw new Exception($"GetByEmailAsync: {ex.Message}");
+            }
         }
 
         Task<PersonDom> IGenericRepo<PersonDom>.UpdateAsync(int id, PersonDom updatedItem)
@@ -93,30 +89,52 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task<PersonDom> AddAsync(PersonDom newPersonDom)
         {
-            var address = await _addressRepo.UpsertAsync(null, newPersonDom.Address);
+            using var transaction = await _context.Database.BeginTransactionAsync();
 
-            newPersonDom.AddressId = address.Id;
-            newPersonDom.Address = address;
-
-            if (newPersonDom.School != null)
+            try
             {
-                SchoolDom? school = await _schoolRepo.UpsertAsync(null, newPersonDom.School);
-                newPersonDom.SchoolId = school.Id;
-                newPersonDom.School = school;
+                var address = await _context.Addresses
+                    .FirstOrDefaultAsync(a =>
+                        a.Street == newPersonDom.Address.Street &&
+                        a.City == newPersonDom.Address.City)
+                    ?? _context.Addresses.Add(_mapper.Map<AddressEF>(newPersonDom.Address)).Entity;
+
+                SchoolDom? school = null;
+
+                if (newPersonDom.School != null)
+                {
+                    var existingSchool = await _context.Schools
+                        .FirstOrDefaultAsync(s => s.Name == newPersonDom.School.Name);
+
+                    if (existingSchool != null)
+                    {
+                        school = _mapper.Map<SchoolDom>(existingSchool);
+                    }
+                    else
+                    {
+                        var newSchoolEntity = _mapper.Map<SchoolEF>(newPersonDom.School);
+                        var addedSchool = _context.Schools.Add(newSchoolEntity).Entity;
+
+                        school = _mapper.Map<SchoolDom>(addedSchool);
+                    }
+                }
+
+                var person = _mapper.Map<PersonEF>(newPersonDom);
+                person.AddressId = address.Id;
+                person.SchoolId = school?.Id;
+
+                _context.People.Add(person);
+                await _context.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                return _mapper.Map<PersonDom>(person);
             }
-
-            var addedPerson = await _client
-                .From<ExtendedPerson>()
-                .Insert(_mapper.Map<ExtendedPerson>(newPersonDom));
-
-            if (addedPerson.Model == null)
+            catch (Exception ex)
             {
-                throw new PersonException("Something went wrong while adding your account");
+                await transaction.RollbackAsync();
+                throw new Exception("Something went wrong", ex);
             }
-
-            newPersonDom.Id = addedPerson.Model.Id;
-
-            return _mapper.Map<PersonDom>(newPersonDom);
         }
 
         public async Task<(PersonDom, PersonDom, bool shouldSendEmail)> UpdateAsync(int personId, PersonDom updatedPerson)
@@ -128,28 +146,26 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
                 throw new PersonException("Person not found");
             }
 
-            var originalPerson = currentPerson.DeepCopy();
+            var originalPerson = _mapper.Map<PersonDom>(currentPerson);
 
             var isAddressUpdated = await UpdateAddressIfNeeded(currentPerson, updatedPerson.Address);
             var isSchoolUpdated = await UpdateSchoolIfNeeded(currentPerson, updatedPerson.School);
-            bool shouldSendEmail = currentPerson.Gender != updatedPerson.Gender || currentPerson.BirthDate != updatedPerson.BirthDate;
+
+            bool shouldSendEmail = currentPerson.Gender != updatedPerson.Gender || DateOnly.FromDateTime(currentPerson.BirthDate) != updatedPerson.BirthDate;
 
             if (isAddressUpdated || isSchoolUpdated || !_mapper.Map<PersonDom>(currentPerson).Equals(updatedPerson))
             {
                 currentPerson.LastName = updatedPerson.LastName;
                 currentPerson.FirstName = updatedPerson.FirstName;
                 currentPerson.IBANNumber = updatedPerson.IBANNumber;
-                currentPerson.BirthDate = updatedPerson.BirthDate;
+                currentPerson.BirthDate = updatedPerson.BirthDate.ToDateTime(TimeOnly.Parse("00:00:00"));
                 currentPerson.Gender = updatedPerson.Gender;
 
-                var person = await currentPerson.Update<ExtendedPerson>();
-                if (person.Model == null)
-                {
-                    throw new PersonException("Something went wrong while updating your account");
-                }
-            }
+                _context.People.Update(_mapper.Map<PersonEF>(currentPerson));
 
-            return (_mapper.Map<PersonDom>(originalPerson), _mapper.Map<PersonDom>(currentPerson), shouldSendEmail);
+                await _context.SaveChangesAsync();
+            }
+            return (originalPerson, _mapper.Map<PersonDom>(currentPerson), shouldSendEmail);
         }
 
         public async Task UpdatePersonEmailAsync(int personId, PersonDom updatedPerson)
@@ -161,13 +177,18 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
                 throw new PersonException("Person not found");
             }
 
-            currentPerson.Email = updatedPerson.Email;
-            currentPerson.UserId = updatedPerson.UserId;
-
-            var person = await currentPerson.Update<ExtendedPerson>();
-            if (person.Model == null)
+            try
             {
-                throw new PersonException("Something went wrong while updating your account");
+                currentPerson.Email = updatedPerson.Email;
+                currentPerson.UserId = updatedPerson.UserId;
+
+                _context.People.Update(_mapper.Map<PersonEF>(currentPerson));
+
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"UpdatePersonEmailAsync: {ex.Message}");
             }
         }
 
@@ -178,40 +199,40 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
 
         public async Task DeleteAsync(int personId)
         {
-            var response = await _client
-                .From<SimplePerson>()
-                .Where(c => c.Id == personId)
-                .Single();
+            var person = await GetPersonById(personId);
 
-            if (response == null)
+            if (person == null)
             {
                 throw new PersonNotFoundException("This person doesn't exist anymore");
             }
 
-            await response.Delete<SimplePerson>();
+            try
+            {
+                _context.Remove(person);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"DeleteAsync: {ex.Message}");
+            }
         }
 
         public async Task<PersonDom?> GetByGuidAsync(string userId)
         {
-            var person = await _client.From<ExtendedPerson>()
-                .Where(p => p.UserId == userId)
-                .Limit(1)
-                .Single();
-
-            if (person == null)
-            {
-                throw new PersonException("Something went wrong while getting your account information");
-            }
-
-            return _mapper.Map<PersonDom>(person);
+            // Onzeker
+            throw new NotImplementedException();
         }
 
         private async Task<ExtendedPerson?> GetPersonById(int personId)
         {
-            return await _client.From<ExtendedPerson>()
-                .Where(p => p.Id == personId)
-                .Limit(1)
-                .Single();
+            try
+            {
+                return _mapper.Map<ExtendedPerson?>(await GetByIdAsync(personId));
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"GetPersonById: {ex.Message}");
+            }
         }
 
         private async Task<bool> UpdateAddressIfNeeded(ExtendedPerson person, AddressDom updatedAddress)
@@ -222,7 +243,7 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
             {
                 var address = await _addressRepo.UpsertAsync(null, updatedAddress);
                 person.AddressId = address.Id;
-                person.Address = _mapper.Map<ExtendedAddress>(address);
+                person.Address = _mapper.Map<AddressEF>(address);
                 return true;
             }
 
@@ -245,7 +266,7 @@ namespace Jogging.Infrastructure.Repositories.SupabaseRepos
             {
                 var school = await _schoolRepo.UpsertAsync(null, updatedPersonSchool);
                 person.SchoolId = school.Id;
-                person.School = _mapper.Map<SimpleSchool>(school);
+                person.School = _mapper.Map<SchoolEF>(school);
 
                 return true;
             }

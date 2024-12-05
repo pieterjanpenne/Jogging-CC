@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace Jogging.Infrastructure.Models.DatabaseModels.Address;
+namespace Jogging.Infrastructure2.Models.DatabaseModels.Address;
 
 [Table("Address")]
 public class ExtendedAddress

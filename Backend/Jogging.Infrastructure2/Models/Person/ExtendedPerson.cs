@@ -3,7 +3,7 @@ using Jogging.Infrastructure2.Models.Account;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace Jogging.Infrastructure.Models.DatabaseModels.Person
+namespace Jogging.Infrastructure2.Models.DatabaseModels.Person
 {
     [Table("Person")]
     public class ExtendedPerson

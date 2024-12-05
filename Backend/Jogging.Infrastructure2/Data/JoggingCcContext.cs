@@ -19,7 +19,7 @@ public partial class JoggingCcContext : DbContext
     {
     }
 
-    public virtual DbSet<AddressEf> Addresses { get; set; }
+    public virtual DbSet<AddressEF> Addresses { get; set; }
 
     public virtual DbSet<AgeCategoryEF> AgeCategories { get; set; }
 
