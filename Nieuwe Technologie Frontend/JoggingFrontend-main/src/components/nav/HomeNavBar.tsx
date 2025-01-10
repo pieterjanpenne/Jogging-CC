@@ -52,7 +52,7 @@ const HomeNavBar: React.FC<NavMenuProps> = ({
     },
     { name: "Over ons", ref: sectionRefs.section5Ref },
     { name: "Veelgestelde vragen", ref: sectionRefs.section4Ref },
-    { name: "Foto's", navigate: "/fotos", ref: sectionRefs.section6Ref },
+    { name: "Clubs", navigate: "/clubs", ref: sectionRefs.section6Ref },
   ];
 
   const handleClick = (item: {

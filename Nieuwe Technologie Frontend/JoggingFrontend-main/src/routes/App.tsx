@@ -31,7 +31,7 @@ import PrivacyPolicy from "@/routes/legal/PrivacyPolicy.tsx";
 import GeneralConditions from "@/routes/legal/GeneralConditions.tsx";
 import DeleteAccount from "@/routes/admin/settings/account/DeleteAccount.tsx";
 import Uitslagen from "./public/uitslagen/Uitslagen";
-import { Fotos } from "./public/fotos/Fotos";
+import { Clubs } from "./public/clubs/clubs";
 
 interface ProtectedRouteProps {
   requiredRole: string;
@@ -70,7 +70,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/klassementen" element={<Klassementen />} />
         <Route path="/uitslagen" element={<Uitslagen />} />
-        <Route path="/fotos" element={<Fotos />} />
+        <Route path="/clubs" element={<Clubs />} />
         <Route path="/wedstrijd/:id" element={<Wedstrijd />} />
         <Route element={<UnauthenticatedRoute />}>
           <Route path="/wedstrijd/:id/inschrijven" element={<Inschrijving />} />

@@ -7,7 +7,7 @@ import OverOns from "./overOns/OverOns";
 import React, { useRef } from "react";
 import Footer from "@/components/footer/Footer";
 import heroFoto from "../../assets/images/heroFoto.jpg";
-import { Fotos } from "./fotos/Fotos";
+import { Clubs } from "./clubs/clubs";
 
 export default function Home() {
   const section1Ref = useRef<HTMLDivElement>(null);
@@ -92,7 +92,7 @@ export default function Home() {
             className="flex flex-col w-full max-w-4xl gap-2 pt-20 mx-auto gap-y-6"
             ref={section6Ref}
           >
-            <Fotos />
+            <Clubs />
           </div>
         </div>
       </main>
